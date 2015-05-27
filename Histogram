@@ -1,0 +1,94 @@
+package org;
+
+import java.io.IOException;
+import java.util.StringTokenizer;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.conf.Configured;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.util.Tool;
+import org.apache.hadoop.util.ToolRunner;
+
+public class Histogram extends Configured implements Tool {
+
+   enum NEGCOUNTER {
+      NEGATIVE
+   }
+
+   public static class HistogramMapper extends
+         Mapper<LongWritable, Text, IntWritable, IntWritable> {
+      private final static IntWritable one = new IntWritable(1);
+      private IntWritable num = new IntWritable();
+
+      public void map(LongWritable key, Text value, Context context)
+            throws IOException, InterruptedException {
+         String line = value.toString();
+         StringTokenizer tokenizer = new StringTokenizer(line);
+         while (tokenizer.hasMoreTokens()) {
+            String strnum = tokenizer.nextToken();
+            int intv = Integer.parseInt(strnum);
+            
+            if (intv < 0) {
+               context.getCounter(NEGCOUNTER.NEGATIVE).increment(1);
+            } else {
+               num.set(intv);
+               context.write(num, one);
+            }
+         }
+      }
+   }
+
+   public static class HistogramReducer extends
+         Reducer<IntWritable, IntWritable, IntWritable, IntWritable> {
+
+      public void reduce(IntWritable key, Iterable<IntWritable> values,
+            Context context) throws IOException, InterruptedException {
+         int sum = 0;
+         for (IntWritable val : values) {
+            sum += val.get();
+         }
+         context.write(key, new IntWritable(sum));
+      }
+   }
+
+   public int run(String[] args) throws Exception {
+      if (args.length != 2) {
+         System.out.printf(
+               "Usage: %s [generic options] <input dir> <output dir>\n",
+               getClass().getSimpleName());
+         return -1;
+      }
+      Job job = new Job(getConf());
+      job.setJobName("Histogram-job");
+      job.setJarByClass(Histogram.class);
+      FileInputFormat.setInputPaths(job, new Path(args[0]));
+      FileSystem.get(getConf()).delete(new Path(args[1]), true);
+      FileOutputFormat.setOutputPath(job, new Path(args[1]));
+
+      job.setMapperClass(HistogramMapper.class);
+      job.setReducerClass(HistogramReducer.class);
+      job.setMapOutputKeyClass(IntWritable.class);
+      job.setMapOutputValueClass(IntWritable.class);
+
+      job.setOutputKeyClass(IntWritable.class);
+      job.setOutputValueClass(IntWritable.class);
+
+      boolean success = job.waitForCompletion(true);
+      return success ? 0 : 1;
+   }
+
+   public static void main(String[] args) throws Exception {
+      int exitCode = ToolRunner.run(new Configuration(), new Histogram(),
+            args);
+      System.exit(exitCode);
+   }
+}
